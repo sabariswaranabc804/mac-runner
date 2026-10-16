@@ -13,9 +13,18 @@ jobs:
       - name: Download GitHub Runner for Mac (Apple Silicon)
         run: |
           mkdir actions-runner && cd actions-runner
-          LATEST_URL=$(curl -s https://api.github.com/repos/actions/runner/releases/latest \
-            | jq -r '.assets[] | select(.name | test("actions-runner-osx-arm64-[0-9.]+\\.tar\\.gz$")) | .browser_download_url')
-          curl -o actions-runner-osx-arm64.tar.gz -L "$LATEST_URL"
+          
+          # Fetch latest runner release tag directly from GitHub redirect (No jq errors!)
+          LATEST_TAG=$(curl -sI https://github.com/actions/runner/releases/latest | grep -i "^location:" | tr -d '\r' | awk -F'/' '{print $NF}')
+          VERSION="${LATEST_TAG#v}"
+          
+          echo "Latest runner version detected: $VERSION"
+          
+          # Build direct download URL for Apple Silicon (ARM64)
+          DOWNLOAD_URL="https://github.com/actions/runner/releases/download/${LATEST_TAG}/actions-runner-osx-arm64-${VERSION}.tar.gz"
+          
+          echo "Downloading from: $DOWNLOAD_URL"
+          curl -o actions-runner-osx-arm64.tar.gz -L "$DOWNLOAD_URL"
           tar xzf ./actions-runner-osx-arm64.tar.gz
 
       - name: Connect This Mac to Private Repo
@@ -32,6 +41,11 @@ jobs:
             -H "Authorization: Bearer $PAT" \
             https://api.github.com/repos/$OWNER/$PRIVATE_REPO/actions/runners/registration-token | jq -r .token)
 
+          if [ "$REG_TOKEN" == "null" ] || [ -z "$REG_TOKEN" ]; then
+            echo "Error: Failed to obtain registration token. Check your RUNNER_ADMIN_PAT permissions."
+            exit 1
+          fi
+
           # Connect to Private Repo with label 'cloud-mac' for 1 job (--ephemeral)
           ./config.sh \
             --url https://github.com/$OWNER/$PRIVATE_REPO \
@@ -43,3 +57,4 @@ jobs:
 
           # Run the Private Repo job, then automatically delete this runner
           ./run.sh
+
